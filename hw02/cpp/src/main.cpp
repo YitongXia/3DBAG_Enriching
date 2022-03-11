@@ -12,6 +12,24 @@ void  list_all_vertices(json& j);
 void  visit_roofsurfaces(json &j);
 
 
+void cal_floor(json & j)
+{
+    for(auto& co:j["CityObjects"].items()) {
+        std::cout << co.value()["type"] << std::endl;
+        if (co.value()["type"] == "building") {
+            for (auto &g: co.value()["attribute"]) {
+                double h_dak_max = g["h_dak_max"];
+                double h_dak_min = g["h_dak_min"];
+                double h_maaiveld = g["h_maaiveld"];
+                double height = (h_dak_max - h_dak_min) * 0.7 + (h_dak_min - h_maaiveld);
+                std::cout << height / 3 << std::endl;
+                std::cout << int(height / 3) << std::endl;
+                break;
+            }
+        }
+    }
+}
+
 int main(int argc, const char * argv[]) {
 
   //-- reading the file with nlohmann json: https://github.com/nlohmann/json  
