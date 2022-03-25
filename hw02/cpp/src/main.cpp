@@ -180,21 +180,27 @@ int main(int argc, const char * argv[]) {
     //-- reading the file with nlohmann json: https://github.com/nlohmann/json
 
     // input file
-    // for the first step: create new semantic object:
+    //------this is the first step of the program-----
+    // need to comment out these code after finish it
+
     std::ifstream input("../../data/myfile.city.json");
     json j;
     input >> j;
     input.close();
-    
+
+    split_surface(j);
+
     std::ofstream o("../../data/split_myfile.city.json");
     o << j.dump(2) << std::endl;
     o.close();
-    
+
     // then triangulate the split_myfile.city.json
     // and name the triangulated file as tri_split_myfile.city.json
     // and use the code below to calculate the area and output file.
     //don't forget to comment the code above and uncomment the code below!
-    
+
+    //------this is the second step of the program-----
+
 //    std::ifstream split_input("../../data/split_myfile.city.json");
 //    json split_j;
 //    split_input >> split_j;
@@ -206,7 +212,8 @@ int main(int argc, const char * argv[]) {
 //    tri.close();
 //
 //    //split_surface(j);
-//    cal_area(j,tri_j);
+//    cal_area(split_j,tri_j);
+//    cal_floor(split_j);
 //
 //    std::ofstream o1("../../data/final_cal.city.json");
 //    o1 << j.dump(2) << std::endl;
