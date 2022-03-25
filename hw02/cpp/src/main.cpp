@@ -3,14 +3,34 @@
 #include <fstream>
 #include <string>
 #include "json.hpp"
+#include <cmath>
 
 using json = nlohmann::json;
 
+class Point{
+public:
+    double x;
+    double y;
+    double z;
+    Point(double x1,double y1,double z1): x(x1),y(y1),z(z1)
+    {}
+};
 
-int   get_no_roof_surfaces(json &j);
-void  list_all_vertices(json& j);
-void  visit_roofsurfaces(json &j);
 
+void visit_area(json &j) {
+    for (auto& co : j["CityObjects"].items()) {
+        for (auto& g : co.value()["geometry"]) {
+            if (g["type"] == "Solid") {
+                for(auto & surface:g["semantics"]["surfaces"]){
+                    std::cout<<surface<<std::endl;
+                }
+            }
+        }
+    }
+}
+
+
+// function to calculate the number of floor.
 void cal_floor(json & j)
 {
     for(auto& co:j["CityObjects"].items()) {
@@ -37,112 +57,160 @@ void cal_floor(json & j)
     }
 }
 
+
+
+double triangle_area(std::vector<Point> &v) {
+    double a= sqrt((v[0].x-v[1].x)*(v[0].x-v[1].x)+(v[0].y-v[1].y)*(v[0].y-v[1].y) +(v[0].z-v[1].z)*(v[0].z-v[1].z));
+    double b= sqrt((v[1].x-v[2].x)*(v[1].x-v[2].x)+(v[1].y-v[2].y)*(v[1].y-v[2].y) +(v[1].z-v[2].z)*(v[1].z-v[2].z));
+    double c= sqrt((v[2].x-v[0].x)*(v[2].x-v[0].x)+(v[2].y-v[0].y)*(v[2].y-v[0].y) +(v[2].z-v[0].z)*(v[2].z-v[0].z));
+    double s=(a+b+c)/2;
+    double area= sqrt(s*(s-a)*(s-b)*(s-c));
+    return area;
+}
+
+
+ void split_surface(json &j ){
+
+     for (auto& co : j["CityObjects"].items()) {
+         for (auto &g: co.value()["geometry"]) {
+
+             if (g["type"] == "Solid") {
+                 int roof_index = 0;
+                 int surface_index = 0;
+                 for (int i = 0; i < g["semantics"]["surfaces"].size(); ++i) {
+                     if (g["semantics"]["surfaces"][i]["type"] == "RoofSurface")
+                     {
+                         roof_index = i;
+                         surface_index++;
+                     }
+                     else surface_index++;
+                 }
+                 for (auto &values: g["semantics"]["values"]) {
+
+                     for (int k = 0; k < values.size(); ++k) {
+                         if (values[k] == roof_index) {
+                             for (auto &shell: g["boundaries"]) {
+                                 g["semantics"]["surfaces"][surface_index]["type"] = "RoofSurface";
+                                 g["semantics"]["surfaces"][surface_index]["area"] = 0.0;
+                                 g["semantics"]["surfaces"][surface_index]["BuildingPart_id"] = co.key();
+                                 values[k] = surface_index;
+                                 surface_index++;
+                             }
+                         }
+                     }
+                 }
+             }
+         }
+     }
+}
+
+
+
+
+void cal_area(json & j, json &tri_j) {
+
+    for (auto &co: tri_j["CityObjects"].items()) {
+        int roofsurface = 0;
+
+        for (auto &g: co.value()["geometry"]) {
+            std::vector<int> roof;
+            std::vector<double> area_value;
+
+            if (g["type"] == "Solid") {
+
+                std::string index=co.key();
+
+                for (int i = 0; i < g["semantics"]["surfaces"].size(); ++i) {
+                    //std::cout << g["semantics"]["surfaces"][i] << std::endl;
+                    if (g["semantics"]["surfaces"][i]["type"] == "RoofSurface" && g["semantics"]["surfaces"][i]["area"] == 0.0) {
+                        roof.emplace_back(i);
+                    }
+                }
+                for(auto &item: roof){
+                    area_value.emplace_back(0.0);
+                }
+                for (auto &ring: g["semantics"]["values"]) {
+
+                    for (int i = 0; i < ring.size(); ++i) {
+
+                        for (int k = 0; k < roof.size(); ++k) {
+
+                            if (ring[i] == roof[k]) {
+
+                                for (auto &shell: g["boundaries"]) {
+                                    for (auto &surface: shell[i]) {
+                                        std::vector<Point> vertices;
+
+                                        for (auto &v: surface) {
+
+                                            std::vector<int> vi = tri_j["vertices"][v.get<int>()];
+                                            double x = (vi[0] * tri_j["transform"]["scale"][0].get<double>()) +
+                                                       tri_j["transform"]["translate"][0].get<double>();
+                                            double y = (vi[1] * tri_j["transform"]["scale"][1].get<double>()) +
+                                                       tri_j["transform"]["translate"][1].get<double>();
+                                            double z = (vi[2] * tri_j["transform"]["scale"][2].get<double>()) +
+                                                       tri_j["transform"]["translate"][2].get<double>();
+                                            vertices.emplace_back(Point(x, y, z));
+                                        }
+                                        double area = triangle_area(vertices);
+                                        area_value[k]+=area;
+
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                for(auto & g1: j["CityObjects"][index]["geometry"].items()){
+
+                    for(int p=0;p<roof.size();++p)
+                    {
+                        int roof_index=roof[p];
+                        g1.value()["semantics"]["surfaces"][roof_index]["area"] = area_value[p];
+
+                    }
+                }
+            }
+        }
+    }
+}
+
 int main(int argc, const char * argv[]) {
 
-  //-- reading the file with nlohmann json: https://github.com/nlohmann/json  
-  std::ifstream input("../../data/twobuildings.city.json");
-  json j;
-  input >> j;
-  input.close();
+    //-- reading the file with nlohmann json: https://github.com/nlohmann/json
 
-  //-- get total number of RoofSurface in the file
-  // int noroofsurfaces = get_no_roof_surfaces(j);
-  // std::cout << "Total RoofSurface: " << noroofsurfaces << std::endl;
+    // input file
+    // for the first step: create new semantic object:
+    std::ifstream input("../../data/myfile.city.json");
+    json j;
+    input >> j;
+    input.close();
+    
+    std::ofstream o("../../data/split_myfile.city.json");
+    o << j.dump(2) << std::endl;
+    o.close();
+    
+    // then triangulate the split_myfile.city.json
+    // and name the triangulated file as tri_split_myfile.city.json
+    // and use the code below to calculate the area and output file.
+    //don't forget to comment the code above and uncomment the code below!
+    
+//    std::ifstream split_input("../../data/split_myfile.city.json");
+//    json split_j;
+//    split_input >> split_j;
+//    split_input.close();
+//
+//    std::ifstream tri("../../data/tri_split_myfile.city.json");
+//    json tri_j;
+//    tri >> tri_j;
+//    tri.close();
+//
+//    //split_surface(j);
+//    cal_area(j,tri_j);
+//
+//    std::ofstream o1("../../data/final_cal.city.json");
+//    o1 << j.dump(2) << std::endl;
+//    o1.close();
 
-  // list_all_vertices(j);
-
-  visit_roofsurfaces(j);
-
-  //-- print out the number of Buildings in the file
-  int nobuildings = 0;
-  for (auto& co : j["CityObjects"]) {
-    if (co["type"] == "Building") {
-      nobuildings += 1;
-    }
-  }
-  std::cout << "There are " << nobuildings << " Buildings in the file" << std::endl;
-
-  //-- print out the number of vertices in the file
-  std::cout << "Number of vertices " << j["vertices"].size() << std::endl;
-
-  //-- add an attribute "volume"
-  for (auto& co : j["CityObjects"]) {
-    if (co["type"] == "Building") {
-      co["attributes"]["volume"] = rand();
-    }
-  }
-
-  //-- write to disk the modified city model (myfile.city.json)
-  std::ofstream o("myfile.city.json");
-  o << j.dump(2) << std::endl;
-  o.close();
-
-  return 0;
-}
-
-
-// Visit every 'RoofSurface' in the CityJSON model and output its geometry (the arrays of indices)
-// Useful to learn to visit the geometry boundaries and at the same time check their semantics.
-void visit_roofsurfaces(json &j) {
-  for (auto& co : j["CityObjects"].items()) {
-    for (auto& g : co.value()["geometry"]) {
-      if (g["type"] == "Solid") {
-        for (int i = 0; i < g["boundaries"].size(); i++) {
-          for (int j = 0; j < g["boundaries"][i].size(); j++) {
-            int sem_index = g["semantics"]["values"][i][j];
-            if (g["semantics"]["surfaces"][sem_index]["type"].get<std::string>().compare("RoofSurface") == 0) {
-              std::cout << "RoofSurface: " << g["boundaries"][i][j] << std::endl;
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-
-// Returns the number of 'RooSurface' in the CityJSON model
-int get_no_roof_surfaces(json &j) {
-  int total = 0;
-  for (auto& co : j["CityObjects"].items()) {
-    for (auto& g : co.value()["geometry"]) {
-      if (g["type"] == "Solid") {
-        for (auto& shell : g["semantics"]["values"]) {
-          for (auto& s : shell) {
-            if (g["semantics"]["surfaces"][s.get<int>()]["type"].get<std::string>().compare("RoofSurface") == 0) {
-              total += 1;
-            }
-          }
-        }
-      }
-    }
-  }
-  return total;
-}
-
-
-// CityJSON files have their vertices compressed: https://www.cityjson.org/specs/1.1.1/#transform-object
-// this function visits all the surfaces and print the (x,y,z) coordinates of each vertex encountered
-void list_all_vertices(json& j) {
-  for (auto& co : j["CityObjects"].items()) {
-    std::cout << "= CityObject: " << co.key() << std::endl;
-    for (auto& g : co.value()["geometry"]) {
-      if (g["type"] == "Solid") {
-        for (auto& shell : g["boundaries"]) {
-          for (auto& surface : shell) {
-            for (auto& ring : surface) {
-              std::cout << "---" << std::endl;
-              for (auto& v : ring) { 
-                std::vector<int> vi = j["vertices"][v.get<int>()];
-                double x = (vi[0] * j["transform"]["scale"][0].get<double>()) + j["transform"]["translate"][0].get<double>();
-                double y = (vi[1] * j["transform"]["scale"][1].get<double>()) + j["transform"]["translate"][1].get<double>();
-                double z = (vi[2] * j["transform"]["scale"][2].get<double>()) + j["transform"]["translate"][2].get<double>();
-                std::cout << std::setprecision(2) << std::fixed << v << " (" << x << ", " << y << ", " << z << ")" << std::endl;                
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+    return 0;
 }
